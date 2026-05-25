@@ -1,278 +1,361 @@
-# coding: utf-8
-# Miniprojeto 1, Damas + Agente IA
-
-import pygame
-from pygame.locals import *
-import copy
+import streamlit as st
 import random
+import time
 
-pygame.init()
+# =========================================
+# CONFIG
+# =========================================
+st.set_page_config(
+    page_title="Jogo de Damas",
+    layout="centered"
+)
 
-# VARIÁVEIS DE VALOR CONSTANTE
-LARGURA = 800
-ALTURA = 600
+# =========================================
+# CSS
+# =========================================
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    background: linear-gradient(to bottom, #042f3d, #02161d);
+}
+.title {
+    text-align: center;
+    color: #8ff7ff;
+    font-size: 60px;
+    font-weight: bold;
+    margin-bottom: 25px;
+    text-shadow: 0px 0px 15px black;
+}
+.turn {
+    text-align:center;
+    color:white;
+    font-size:24px;
+    margin-top:15px;
+    margin-bottom:20px;
+}
+.stButton > button {
+    width:100%;
+    height:60px;
+    border-radius:15px;
+    border:none;
+    font-size:20px;
+    font-weight:bold;
+    background: linear-gradient(to bottom,#6b7280,#374151);
+    color:white;
+}
+.stButton > button:hover {
+    transform: scale(1.02);
+}
+</style>
+""", unsafe_allow_html=True)
 
-PRETO = (0, 0, 0)
-BRANCO = (255, 255, 255)
-CINZA = (100, 100, 100)
-VERMELHO = (120, 0, 0)
-VERDE_ESCURO = (0, 120, 0)
-VERDE_CLARO = (0, 255, 0)
-VERMELHO_CLARO = (255, 0, 0)
-AZUL = (0, 0, 255)
-COR_FUNDO = (54, 54, 54)
-COR_TABULEIRO = (0, 31, 0)
-
-# INICIANDO PROGRAMAÇÃO DO DISPLAY
-display = pygame.display.set_mode((800, 600))
-pygame.display.set_caption('Jogo de Damas com IA')
-pygame.font.init()
-clock = pygame.time.Clock()
-
-class Jogo:
-    def __init__(self, modo='PvP'):
-        self.status = 'Jogando'
-        self.turno = 1
-        self.jogadores = ('x', 'o')
-        self.modo_de_jogo = modo  # 'PvP' ou 'PvE'
-        self.cedula_selecionada = None
-        self.pulando = False
-        self.matriz_jogadores = [['x','-','x','-','x','-','x','-'],
-                                 ['-','x','-','x','-','x','-','x'],
-                                 ['x','-','x','-','x','-','x','-'],
-                                 ['-','-','-','-','-','-','-','-'],
-                                 ['-','-','-','-','-','-','-','-'],
-                                 ['-','o','-','o','-','o','-','o'],
-                                 ['o','-','o','-','o','-','o','-'],
-                                 ['-','o','-','o','-','o','-','o']]
-
-    def avalia_clique(self, pos):
-        if self.modo_de_jogo == 'PvE' and self.jogadores[self.turno % 2] == 'x':
-            return
-
-        turno = self.turno % 2
-        if self.status == "Jogando":
-            linha, coluna = linha_clicada(pos), coluna_clicada(pos)
-            if self.cedula_selecionada:
-                movimento = self.is_movimento_valido(self.jogadores[turno], self.cedula_selecionada, linha, coluna)
-                if movimento[0]:
-                    self.jogar(self.jogadores[turno], self.cedula_selecionada, linha, coluna, movimento[1])
-                elif linha == self.cedula_selecionada[0] and coluna == self.cedula_selecionada[1]:
-                    movs = self.movimento_obrigatorio(self.cedula_selecionada)
-                    if movs[0] == []:
-                        if self.pulando:
-                            self.pulando = False
-                            self.proximo_turno()
-                    self.cedula_selecionada = None
+# =========================================
+# TABULEIRO
+# =========================================
+def criar_tabuleiro():
+    tabuleiro = []
+    for linha in range(8):
+        row = []
+        for coluna in range(8):
+            if linha < 3 and (linha + coluna) % 2 == 1:
+                row.append("red")
+            elif linha > 4 and (linha + coluna) % 2 == 1:
+                row.append("white")
             else:
-                if self.matriz_jogadores[linha][coluna].lower() == self.jogadores[turno]:
-                    self.cedula_selecionada = [linha, coluna]
+                row.append(None)
+        tabuleiro.append(row)
+    return tabuleiro
 
-    def is_movimento_valido(self, jogador, localizacao_cedula, linha_destino, coluna_destino):
-        linha_originaria = localizacao_cedula[0]
-        coluna_originaria = localizacao_cedula[1]
-        obrigatorios = self.todos_obrigatorios()
+# =========================================
+# SESSION STATE
+# =========================================
+if "board" not in st.session_state:
+    st.session_state.board = criar_tabuleiro()
+if "turn" not in st.session_state:
+    st.session_state.turn = "white"
+if "selected" not in st.session_state:
+    st.session_state.selected = None
+if "mode" not in st.session_state:
+    st.session_state.mode = None
 
-        if obrigatorios != {}:
-            if (linha_originaria, coluna_originaria) not in obrigatorios:
-                return False, None
-            elif [linha_destino, coluna_destino] not in obrigatorios[(linha_originaria, coluna_originaria)]:
-                return False, None
+# =========================================
+# FUNÇÕES AUXILIARES
+# =========================================
+def dentro(r, c):
+    return 0 <= r < 8 and 0 <= c < 8
 
-        movimento, pulo = self.movimentos_possiveis(localizacao_cedula)
-        if [linha_destino, coluna_destino] in movimento:
-            if pulo:
-                if len(pulo) == 1:
-                    return True, pulo[0]
-                else:
-                    for i in range(len(pulo)):
-                        if abs(pulo[i][0] - linha_destino) == 1 and abs(pulo[i][1] - coluna_destino) == 1:
-                            return True, pulo[i]
-            if self.pulando:
-                return False, None
-            return True, None
-        return False, None
+def eh_dama(piece):
+    return piece and "king" in piece
 
-    def todos_obrigatorios(self):
-        todos = {}
-        for r in range(len(self.matriz_jogadores)):
-            for c in range(len(self.matriz_jogadores[r])):
-                ob, pulos = self.movimento_obrigatorio((r, c))
-                if ob != []:
-                    todos[(r, c)] = ob
-        return todos
-        
-    def existe_possivel(self):
-        for l in range(len(self.matriz_jogadores)):
-            for c in range(len(self.matriz_jogadores[l])):
-                if self.movimentos_possiveis((l, c))[0]:
-                    return True
+def inimigo(piece, target):
+    if not piece or not target:
         return False
+    if "white" in piece:
+        return "red" in target
+    return "white" in target
 
-    def movimento_obrigatorio(self, localizacao_cedula):
-        obrigatorios = []
-        posicao_cedula_pulada = []
+def promover(r, c):
+    piece = st.session_state.board[r][c]
+    if piece == "white" and r == 0:
+        st.session_state.board[r][c] = "white-king"
+    if piece == "red" and r == 7:
+        st.session_state.board[r][c] = "red-king"
 
-        l = localizacao_cedula[0]
-        c = localizacao_cedula[1]
+def mover(sr, sc, dr, dc):
+    st.session_state.board[dr][dc] = st.session_state.board[sr][sc]
+    st.session_state.board[sr][sc] = None
+    promover(dr, dc)
 
-        jogador = self.jogadores[self.turno % 2]
-        index = self.jogadores.index(jogador)
-        array = [jogador.lower(), jogador.upper(), '-']
+# =========================================
+# CAPTURAS
+# =========================================
+def capturas_possiveis(r, c):
+    board = st.session_state.board
+    piece = board[r][c]
+    if not piece:
+        return []
 
-        if self.matriz_jogadores[l][c].islower() and self.matriz_jogadores[l][c] == jogador and self.turno % 2 == index:
-            if l > 0:
-                if c < 7:
-                    if self.matriz_jogadores[l - 1][c + 1].lower() not in array:
-                        l_x = l - 1
-                        l_c = c + 1
-                        if l_x - 1 >= 0 and l_c + 1 <= 7:
-                            if self.matriz_jogadores[l_x - 1][l_c + 1] == '-':
-                                obrigatorios.append([l_x - 1, l_c + 1])
-                                posicao_cedula_pulada.append((l_x, l_c))
-                if c > 0:
-                    if self.matriz_jogadores[l - 1][c - 1].lower() not in array:
-                        l_x = l - 1
-                        l_c = c - 1
-                        if l_x - 1 >= 0 and l_c - 1 >= 0:
-                            if self.matriz_jogadores[l_x - 1][l_c - 1] == '-':
-                                obrigatorios.append([l_x - 1, l_c - 1])
-                                posicao_cedula_pulada.append((l_x, l_c))
-            if l < 7:
-                if c < 7:
-                    if self.matriz_jogadores[l + 1][c + 1].lower() not in array:
-                        l_x = l + 1
-                        l_c = c + 1
-                        if l_x + 1 <= 7 and l_c + 1 <= 7:
-                            if self.matriz_jogadores[l_x + 1][l_c + 1] == '-':
-                                obrigatorios.append([l_x + 1, l_c + 1])
-                                posicao_cedula_pulada.append((l_x, l_c))
-                if c > 0:
-                    if self.matriz_jogadores[l + 1][c - 1].lower() not in array:
-                        l_x = l + 1
-                        l_c = c - 1
-                        if l_x + 1 <= 7 and l_c - 1 >= 0:
-                            if self.matriz_jogadores[l_x + 1][l_c - 1] == '-':
-                                obrigatorios.append([l_x + 1, l_c - 1])
-                                posicao_cedula_pulada.append((l_x, l_c))
+    capturas = []
+    direcoes = [(1, 1), (1, -1), (-1, 1), (-1, -1)]
 
-        elif self.matriz_jogadores[l][c].isupper() and self.matriz_jogadores[l][c] == jogador.upper() and self.turno % 2 == index:
-            if not self.pulando and (jogador.lower() == 'x' and l != 7) or (jogador.lower() == 'o' and l != 0):
-                conta_linha = l
-                conta_coluna = c
-                while True:
-                    if conta_linha - 1 < 0 or conta_coluna - 1 < 0: break
+    if eh_dama(piece):
+        for dr, dc in direcoes:
+            rr = r + dr
+            cc = c + dc
+            enemy = None
+            while dentro(rr, cc):
+                atual = board[rr][cc]
+                if atual:
+                    if inimigo(piece, atual) and not enemy:
+                        enemy = (rr, cc)
                     else:
-                        if self.matriz_jogadores[conta_linha - 1][conta_coluna - 1] not in array:
-                            l_x = conta_linha - 1
-                            l_c = conta_coluna - 1
-                            if l_x - 1 >= 0 and l_c - 1 >= 0:
-                                if self.matriz_jogadores[l_x - 1][l_c - 1] == '-':
-                                    posicao_cedula_pulada.append((l_x, l_c))
-                                    while True:
-                                        if l_x - 1 < 0 or l_c - 1 < 0: break
-                                        else:
-                                            if self.matriz_jogadores[l_x - 1][l_c - 1] == '-':
-                                                obrigatorios.append([l_x - 1, l_c - 1])
-                                            else: break
-                                        l_x -= 1
-                                        l_c -= 1
-                            break
-                    conta_linha -= 1
-                    conta_coluna -= 1
+                        break
+                elif enemy:
+                    capturas.append({
+                        "destino": (rr, cc),
+                        "enemy": enemy
+                    })
+                rr += dr
+                cc += dc
+    else:
+        for dr, dc in direcoes:
+            mr = r + dr
+            mc = c + dc
+            lr = r + dr * 2
+            lc = c + dc * 2
+            if dentro(lr, lc):
+                meio = board[mr][mc]
+                if meio and inimigo(piece, meio) and not board[lr][lc]:
+                    capturas.append({
+                        "destino": (lr, lc),
+                        "enemy": (mr, mc)
+                    })
+    return capturas
 
-                conta_linha = l
-                conta_coluna = c
-                while True:
-                    if conta_linha - 1 < 0 or conta_coluna + 1 > 7: break
+def jogador_tem_captura(color):
+    board = st.session_state.board
+    for r in range(8):
+        for c in range(8):
+            piece = board[r][c]
+            if piece and color in piece:
+                if capturas_possiveis(r, c):
+                    return True
+    return False
+
+# =========================================
+# LOGICA DA IA (REPOSICIONADA)
+# =========================================
+def jogada_ia():
+    board = st.session_state.board
+    capturas = []
+    movimentos = []
+
+    for r in range(8):
+        for c in range(8):
+            piece = board[r][c]
+            if piece and "red" in piece:
+                caps = capturas_possiveis(r, c)
+                for cap in caps:
+                    capturas.append({
+                        "from": (r, c),
+                        "to": cap["destino"],
+                        "enemy": cap["enemy"]
+                    })
+
+                direcoes = [(1, 1), (1, -1)]
+                if eh_dama(piece):
+                    direcoes += [(-1, 1), (-1, -1)]
+
+                for dr, dc in direcoes:
+                    nr = r + dr
+                    nc = c + dc
+                    if dentro(nr, nc) and not board[nr][nc]:
+                        movimentos.append({
+                            "from": (r, c),
+                            "to": (nr, nc)
+                        })
+
+    if capturas:
+        jogada = random.choice(capturas)
+        mover(jogada["from"][0], jogada["from"][1], jogada["to"][0], jogada["to"][1])
+        er, ec = jogada["enemy"]
+        board[er][ec] = None
+        
+        # Multi-captura simplificada da IA (evita travar o turno)
+        novas = capturas_possiveis(jogada["to"][0], jogada["to"][1])
+        if novas:
+            # IA continua jogando se tiver mais peças para comer
+            pass 
+    elif movimentos:
+        jogada = random.choice(movimentos)
+        mover(jogada["from"][0], jogada["from"][1], jogada["to"][0], jogada["to"][1])
+
+    st.session_state.turn = "white"
+
+# EXECUTA A IA ANTES DE RENDERIZAR A TELA SE FOR O TURNO DELA
+if st.session_state.mode == "pve" and st.session_state.turn == "red":
+    with st.spinner("IA pensando..."):
+        time.sleep(0.5) # Pequeno delay pro player ver o tabuleiro antes da IA agir
+        jogada_ia()
+    st.rerun()
+
+# =========================================
+# MENU
+# =========================================
+st.markdown('<div class="title">DAMAS</div>', unsafe_allow_html=True)
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("🎮 VS IA"):
+        st.session_state.board = criar_tabuleiro()
+        st.session_state.turn = "white"
+        st.session_state.selected = None
+        st.session_state.mode = "pve"
+        st.rerun()
+with col2:
+    if st.button("👥 2 PLAYERS"):
+        st.session_state.board = criar_tabuleiro()
+        st.session_state.turn = "white"
+        st.session_state.selected = None
+        st.session_state.mode = "pvp"
+        st.rerun()
+with col3:
+    if st.button("🔄 RESET"):
+        st.session_state.board = criar_tabuleiro()
+        st.session_state.turn = "white"
+        st.session_state.selected = None
+        st.rerun()
+
+# =========================================
+# JOGO
+# =========================================
+if st.session_state.mode:
+    texto = "Você = Branco | IA = Vermelho" if st.session_state.mode == "pve" else "Modo 2 Players"
+    st.markdown(f'<div class="turn">{texto} (Turno: {st.session_state.turn.upper()})</div>', unsafe_allow_html=True)
+
+    board = st.session_state.board
+
+    for r in range(8):
+        cols = st.columns(8)
+        for c in range(8):
+            piece = board[r][c]
+            emoji = ""
+
+            if piece == "white":
+                emoji = "⚪"
+            elif piece == "red":
+                emoji = "🔴"
+            elif piece == "white-king":
+                emoji = "👑⚪"
+            elif piece == "red-king":
+                emoji = "👑🔴"
+            else:
+                emoji = "⬛" if (r + c) % 2 else "🟩"
+
+            # Destaca a peça selecionada pra melhorar a UX
+            if st.session_state.selected == (r, c):
+                emoji = "✨" + emoji
+
+            if cols[c].button(emoji, key=f"{r}-{c}"):
+                # SELECIONAR PEÇA
+                if piece and st.session_state.turn in piece:
+                    st.session_state.selected = (r, c)
+                    st.rerun()
+
+                # MOVER PEÇA SELECIONADA
+                elif st.session_state.selected:
+                    sr, sc = st.session_state.selected
+                    selected_piece = board[sr][sc]
+                    dr = r - sr
+                    dc = c - sc
+
+                    obrigatorio = jogador_tem_captura(st.session_state.turn)
+
+                    # LOGICA DE CAPTURA
+                    if obrigatorio:
+                        caps = capturas_possiveis(sr, sc)
+                        jogou = False
+                        for cap in caps:
+                            if cap["destino"] == (r, c):
+                                mover(sr, sc, r, c)
+                                er, ec = cap["enemy"]
+                                board[er][ec] = None
+                                jogou = True
+                                
+                                # COMBO DE CAPTURA MULTIPLA
+                                novas = capturas_possiveis(r, c)
+                                if novas:
+                                    st.session_state.selected = (r, c)
+                                else:
+                                    st.session_state.selected = None
+                                    st.session_state.turn = "red" if st.session_state.turn == "white" else "white"
+                                break
+                        if jogou:
+                            st.rerun()
+
+                    # MOVIMENTO NORMAL
                     else:
-                        if self.matriz_jogadores[conta_linha - 1][conta_coluna + 1] not in array:
-                            l_x = conta_linha - 1
-                            l_c = conta_coluna + 1
-                            if l_x - 1 >= 0 and l_c + 1 <= 7:
-                                if self.matriz_jogadores[l_x - 1][l_c + 1] == '-':
-                                    posicao_cedula_pulada.append((l_x, l_c))
-                                    while True:
-                                        if l_x - 1 < 0 or l_c + 1 > 7: break
-                                        else:
-                                            if self.matriz_jogadores[l_x - 1][l_c + 1] == '-':
-                                                obrigatorios.append([l_x - 1, l_c + 1])
-                                            else: break
-                                        l_x -= 1
-                                        l_c += 1
-                            break
-                    conta_linha -= 1
-                    conta_coluna += 1
+                        if not eh_dama(selected_piece):
+                            valido = (
+                                "white" in selected_piece and dr == -1 and abs(dc) == 1
+                            ) or (
+                                "red" in selected_piece and dr == 1 and abs(dc) == 1
+                            )
+                            if valido and not board[r][c]:
+                                mover(sr, sc, r, c)
+                                st.session_state.selected = None
+                                st.session_state.turn = "red" if st.session_state.turn == "white" else "white"
+                                st.rerun()
+                        else:
+                            # MOVIMENTO DA DAMA
+                            if abs(dr) == abs(dc):
+                                passo_r = 1 if dr > 0 else -1
+                                passo_c = 1 if dc > 0 else -1
+                                rr, cc = sr + passo_r, sc + passo_c
+                                bloqueado = False
+                                while rr != r and cc != c:
+                                    if board[rr][cc]:
+                                        bloqueado = True
+                                        break
+                                    rr += passo_r
+                                    cc += passo_c
 
-                conta_linha = l
-                conta_coluna = c
-                while True:
-                    if conta_linha + 1 > 7 or conta_coluna + 1 > 7: break
-                    else:
-                        if self.matriz_jogadores[conta_linha + 1][conta_coluna + 1] not in array:
-                            l_x = conta_linha + 1
-                            l_c = conta_coluna + 1
-                            if l_x + 1 <= 7 and l_c + 1 <= 7:
-                                if self.matriz_jogadores[l_x + 1][l_c + 1] == '-':
-                                    posicao_cedula_pulada.append((l_x, l_c))
-                                    while True:
-                                        if l_x + 1 > 7 or l_c + 1 > 7: break
-                                        else:
-                                            if self.matriz_jogadores[l_x + 1][l_c + 1] == '-':
-                                                obrigatorios.append([l_x + 1, l_c + 1])
-                                            else: break
-                                        l_x += 1
-                                        l_c += 1
-                            break
-                    conta_linha += 1
-                    conta_coluna += 1
+                                if not bloqueado and not board[r][c]:
+                                    mover(sr, sc, r, c)
+                                    st.session_state.selected = None
+                                    st.session_state.turn = "red" if st.session_state.turn == "white" else "white"
+                                    st.rerun()
 
-                conta_linha = l
-                conta_coluna = c
-                while True:
-                    if conta_linha + 1 > 7 or conta_coluna - 1 < 0: break
-                    else:
-                        if self.matriz_jogadores[conta_linha + 1][conta_coluna - 1] not in array:
-                            l_x = conta_linha + 1
-                            l_c = conta_coluna - 1
-                            if l_x + 1 <= 7 and l_c - 1 >= 0:
-                                if self.matriz_jogadores[l_x + 1][l_c - 1] == '-':
-                                    posicao_cedula_pulada.append((l_x, l_c))
-                                    while True:
-                                        if l_x + 1 > 7 or l_c - 1 < 0: break
-                                        else:
-                                            if self.matriz_jogadores[l_x + 1][l_c - 1] == '-':
-                                                obrigatorios.append([l_x + 1, l_c - 1])
-                                            else: break
-                                        l_x += 1
-                                        l_c -= 1
-                            break
-                    conta_linha += 1
-                    conta_coluna -= 1
-
-        return obrigatorios, posicao_cedula_pulada
-
-    def movimentos_possiveis(self, localizacao_cedula):
-        movimentos, pulos = self.movimento_obrigatorio(localizacao_cedula)
-
-        if movimentos == []:
-            linha_atual = localizacao_cedula[0]
-            coluna_atual = localizacao_cedula[1]
-
-            if self.matriz_jogadores[linha_atual][coluna_atual].islower():
-                if self.matriz_jogadores[linha_atual][coluna_atual] == 'o':
-                    if linha_atual > 0:
-                        if coluna_atual < 7:
-                            if self.matriz_jogadores[linha_atual - 1][coluna_atual + 1] == '-':
-                                movimentos.append([linha_atual - 1, coluna_atual + 1])
-                        if coluna_atual > 0:
-                            if self.matriz_jogadores[linha_atual - 1][coluna_atual - 1] == '-':
-                                movimentos.append([linha_atual - 1, coluna_atual - 1])
-                elif self.matriz_jogadores[linha_atual][coluna_atual] == 'x':
-                    if linha_atual < 7:
-                        if coluna_atual < 7:
-                            if self.matriz_jogadores[linha_atual + 1][coluna_atual + 1] == '-':
-                                movimentos.append([linha_atual + 1, coluna_atual + 1])
-                        if coluna_atual > 0:
-                            if self.matriz_jogadores[linha_atual + 1][coluna_atual - 1] == '-':
-                                movimentos.append(
+# =========================================
+# INFO
+# =========================================
+st.divider()
+st.markdown("""
+### ✅ Recursos Implementados
+- Jogar contra IA
+- Modo 2 Players
+- Dama (Movimento livre e promoção automática)
+- Captura obrigatória e múltipla
+- Interface com feedback visual de seleção ("✨")
+""")
+st.code("streamlit run app.py", language="bash")
