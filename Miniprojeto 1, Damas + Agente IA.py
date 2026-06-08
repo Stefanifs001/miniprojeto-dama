@@ -118,7 +118,7 @@ if st.session_state.screen == "menu":
 
     st.markdown("<div class='title'>DAMAS CLÁSSICO</div>", unsafe_allow_html=True)
 
-    img = Image.open("assets/menu.png")
+    img = Image.open("menu.png")
 
     st.image(img, use_container_width=True)
 
